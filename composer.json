@@ -1,6 +1,6 @@
 {
-  "name": "tangjun/wechatSDK",
-  "description": "A laravel package of wechat SDK",
+  "name": "tangjun/wechat-sdk",
+  "description": "A laravel package of wechat sdk",
   "keywords": ["laravel","wechatSDK"],
 
   "license": "MIT",
