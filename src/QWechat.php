@@ -82,6 +82,8 @@ class QWechat
     const CALLBACKSERVER_GET_URL = '/getcallbackip?';
     const OAUTH_PREFIX 			= 'https://open.weixin.qq.com/connect/oauth2';
     const OAUTH_AUTHORIZE_URL 	= '/authorize?';
+    const OA_APPLY_EVENT_URL = '/oa/applyevent?';
+    const OA_APPLY_EVENT_TEMPLATE_URL = '/oa/gettemplatedetail?';
 
     private $token;
     private $encodingAesKey;
@@ -847,8 +849,7 @@ class QWechat
      */
     protected function setCache($cachename,$value,$expired){
         //TODO: set cache implementation
-        $redis =new \Redis();
-        $redis->connect(config('database.redis.default.host'),config('database.redis.default.port'));
+        $redis = redis();
         return $redis->setex($cachename,3600,$value);
     }
 
@@ -859,8 +860,7 @@ class QWechat
      */
     protected function getCache($cachename){
         //TODO: get cache implementation
-        $redis =new \Redis();
-        $redis->connect(config('database.redis.default.host'),config('database.redis.default.port'));
+        $redis = redis();
         return $redis->get($cachename);
     }
 
@@ -2035,6 +2035,163 @@ class QWechat
      */
     public function getOauthRedirect($callback,$state='STATE',$scope='snsapi_base'){
         return self::OAUTH_PREFIX.self::OAUTH_AUTHORIZE_URL.'appid='.$this->appid.'&redirect_uri='.urlencode($callback).'&response_type=code&scope='.$scope.'&state='.$state.'#wechat_redirect';
+    }
+
+    /**
+     * 提交审批
+     * @param $data
+     * @return bool|mixed
+     */
+    public function saveApplyEvent($data){
+        if (!$this->access_token && !$this->checkAuth()) return false;
+        $result = $this->http_post(self::API_URL_PREFIX.self::OA_APPLY_EVENT_URL.'access_token='.$this->access_token,$data);
+        if ($result)
+        {
+            $json = json_decode($result,true);
+            if (!$json || !empty($json['errcode'])) {
+                return false;
+            }
+            return $json["sp_no"];
+        }
+        return false;
+    }
+
+
+    /**
+     * 获取审批模版详情
+     * @param $templateId
+     * @return bool|mixed
+     */
+    public function getApplyEventTemplateDetail($templateId)
+    {
+        if (!$this->access_token && !$this->checkAuth()) return false;
+        $data = ["template_id"=>$templateId];
+        $result = $this->http_post(self::API_URL_PREFIX.self::OA_APPLY_EVENT_TEMPLATE_URL.'access_token='.$this->access_token,json_encode($data));
+
+        if ($result)
+        {
+            $json = json_decode($result,true);
+            if (!$json || !empty($json['errcode'])) {
+                $this->errCode = $json['errcode'];
+                $this->errMsg = $json['errmsg'];
+                return false;
+            }
+            return $json;
+        }
+        return false;
+    }
+
+    /**
+     * 构建审批json
+     * @param $userId 企业微信useerId
+     * @param $templateId 模版id
+     * @param $contents 控件值
+     * @param $summaryList 摘要
+     * @param int $useTemplateApprover 0自定审批流程1默认审批流程
+     * @param array $approver 自定审批人的userId
+     * @param array $notifyer 自定抄送人
+     * @return bool|false|string
+     */
+    public function buildApplyEventJson($userId,$templateId,$contents,$summaryList,$useTemplateApprover = 1,$approver = [],$notifyer = [])
+    {
+        //获取模版详情
+        $templateInfo = $this->getApplyEventTemplateDetail($templateId);
+
+        //提取控件信息,并进行构建
+        if($templateId){
+            $controlsInfo = [];
+            foreach ($templateInfo["template_content"]["controls"] as $value){
+                //获取控件 名称、id、类型
+                $property = $value["property"];
+                $contentName = $property["title"][0]["text"];
+                $contentId = $property["id"];
+                $contentControl = $property["control"];
+
+                //如果入参没有，跳过
+                if(empty($contents[$contentName])){
+                    continue;
+                }
+
+                //根据类型组装数据
+                switch ($contentControl){
+                    case "Text":
+                        $controlsInfo[] = [
+                            "control" => $contentControl,
+                            "id" => $contentId,
+                            "title" => [
+                                "text" => $contentId,
+                                "lang" => "zh_CN"
+                            ],
+                            "value" => [
+                                "text" => $contents[$contentName]
+                            ]
+                        ];
+                        break;
+                    case "File":
+                        $file = [];
+                        foreach ($contents[$contentName] as $v){
+                            $file[] = [
+                                "file_id" => $v
+                            ];
+                        }
+                        $controlsInfo[] = [
+                            "control" => $contentControl,
+                            "id" => $contentId,
+                            "title" => [
+                                "text" => $contentId,
+                                "lang" => "zh_CN"
+                            ],
+                            "value" => [
+                                "files" => $file
+                            ]
+                        ];
+                        break;
+                }
+            }
+        }
+        else{
+            return false;
+        }
+
+        //构建基础信息
+        $data = [
+            "creator_userid" => $userId,
+            "template_id" => $templateId,
+            "use_template_approver" => $useTemplateApprover,
+            "notify_type" => 1,
+            "apply_data" => [
+                "contents" => $controlsInfo
+            ]
+        ];
+
+        //判断摘要参数，如果没有或大于三个，不进行处理
+        $summaryListCount = count($summaryList);
+        if($summaryListCount > 3 || $summaryListCount == 0){
+            return false;
+        }
+        else{
+            //构建摘要参数
+            foreach ($summaryList as $value){
+                $summary = [];
+                $summary["summary_info"][] = [
+                    "text" => $value,
+                    "lang" => "zh_CN"
+                ];
+                $data["summary_list"][] = $summary;
+            }
+        }
+
+        //判断是否使用默认审核流程
+        if($useTemplateApprover == 0){
+            $data["approver"] = $approver;
+        }
+
+        //判断是否使用自订抄送对象
+        if($notifyer){
+            $data["notifyer"] = $notifyer;
+        }
+
+        return json_encode($data,JSON_UNESCAPED_UNICODE);
     }
 
 }

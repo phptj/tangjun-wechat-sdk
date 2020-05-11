@@ -72,8 +72,7 @@ class WechatJs
     {
         // jsapi_ticket 应该全局存储与更新，以下代码以写入到文件中做示例
         $cacheName = "jsapi_ticket". $this->appId;
-        $redis =new \Redis();
-        $redis->connect(config('database.redis.default.host'),config('database.redis.default.port'));
+        $redis = redis();
         $ticket = $redis->get($cacheName);
         if (empty($ticket)) {
             $accessToken = $this->getAccessToken();
@@ -91,8 +90,7 @@ class WechatJs
     {
         // access_token 应该全局存储与更新，以下代码以写入到文件中做示例
         $cacheName = 'wechat_access_token'.$this->appId;
-        $redis =new \Redis();
-        $redis->connect(config('database.redis.default.host'),config('database.redis.default.port'));
+        $redis = redis();
         $access_token = $redis->get($cacheName);
         if (empty($access_token)) {
             $url = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=$this->appId&secret=$this->appSecret";

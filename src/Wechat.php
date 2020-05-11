@@ -1206,8 +1206,7 @@ class Wechat
      */
     protected function setCache($cachename,$value,$expired = 3600){
         //TODO: set cache implementation
-        $redis =new \Redis();
-        $redis->connect(config('database.redis.default.host'),config('database.redis.default.port'));
+        $redis = redis();
         return $redis->setex($cachename,3600,$value);
     }
 
@@ -1225,8 +1224,7 @@ class Wechat
      */
     protected function getCache($cachename,$exp = 1200){
         //TODO: get cache implementation
-        $redis =new \Redis();
-        $redis->connect(config('database.redis.default.host'),config('database.redis.default.port'));
+        $redis = redis();
         return $redis->get($cachename);
         //return false;
     }
