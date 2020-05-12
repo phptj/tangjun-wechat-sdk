@@ -101,6 +101,7 @@ class QWechat
     public $errCode = 40001;
     public $errMsg = "no access";
     public $logcallback;
+    public $jsapi_ticket;
 
     public function __construct($options)
     {
