@@ -2247,7 +2247,7 @@ class Wechat
         if (!isset($scene_id)) return false;
         switch ($type) {
             case '0':
-                $action_name = 'QR_SCENE';
+                $action_name = 'QR_STR_SCENE';
                 $action_info = array('scene'=>(array('scene_id'=>$scene_id)));
                 break;
 
