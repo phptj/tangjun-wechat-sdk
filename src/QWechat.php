@@ -84,6 +84,7 @@ class QWechat
     const OAUTH_AUTHORIZE_URL 	= '/authorize?';
     const OA_APPLY_EVENT_URL = '/oa/applyevent?';
     const OA_APPLY_EVENT_TEMPLATE_URL = '/oa/gettemplatedetail?';
+    const MESSAGE_UPDATE_TASKCARD = '/message/update_taskcard?';
 
     private $token;
     private $encodingAesKey;
@@ -278,7 +279,7 @@ class QWechat
         curl_setopt($oCurl, CURLOPT_RETURNTRANSFER, 1 );
         curl_setopt($oCurl, CURLOPT_POST,true);
         /**if(PHP_VERSION_ID >= 50500){
-            curl_setopt($oCurl, CURLOPT_SAFE_UPLOAD, FALSE);
+        curl_setopt($oCurl, CURLOPT_SAFE_UPLOAD, FALSE);
         }*/
         curl_setopt($oCurl, CURLOPT_POSTFIELDS,$strPOST);
 
@@ -891,7 +892,7 @@ class QWechat
             return $this->access_token;
         }
 
-        $authname = 'qywechat_access_token'.$appid;
+        $authname = 'qywechat_access_token'.$this->agentid;
         if ($rs = $this->getCache($authname))  {
             $this->access_token = $rs;
             return $rs;
@@ -918,10 +919,10 @@ class QWechat
      * 删除验证数据
      * @param string $appid
      */
-    public function resetAuth($appid=''){
-        if (!$appid) $appid = $this->appid;
+    public function resetAuth($agentid=''){
+        if (!$agentid) $agentid = $this->agentid;
         $this->access_token = '';
-        $authname = 'qywechat_access_token'.$appid;
+        $authname = 'qywechat_access_token'.$agentid;
         $this->removeCache($authname);
         return true;
     }
@@ -930,10 +931,10 @@ class QWechat
      * 删除JSAPI授权TICKET
      * @param string $appid 用于多个appid时使用
      */
-    public function resetJsTicket($appid=''){
-        if (!$appid) $appid = $this->appid;
+    public function resetJsTicket($agentid=''){
+        if (!$agentid) $agentid = $this->agentid;
         $this->jsapi_ticket = '';
-        $authname = 'qywechat_jsapi_ticket'.$appid;
+        $authname = 'qywechat_jsapi_ticket'.$agentid;
         $this->removeCache($authname);
         return true;
     }
@@ -950,7 +951,7 @@ class QWechat
             $this->jsapi_ticket = $jsapi_ticket;
             return $this->jsapi_ticket;
         }
-        $authname = 'qywechat_jsapi_ticket'.$appid;
+        $authname = 'qywechat_jsapi_ticket'.$this->agentid;
         if ($rs = $this->getCache($authname))  {
             $this->jsapi_ticket = $rs;
             return $rs;
@@ -2102,52 +2103,14 @@ class QWechat
         if($templateId){
             $controlsInfo = [];
             foreach ($templateInfo["template_content"]["controls"] as $value){
-                //获取控件 名称、id、类型
-                $property = $value["property"];
-                $contentName = $property["title"][0]["text"];
-                $contentId = $property["id"];
-                $contentControl = $property["control"];
-
-                //如果入参没有，跳过
-                if(empty($contents[$contentName])){
+                //构建控件内容
+                $contentConfig = empty($value["config"]) ? [] : $value["config"];
+                $info = $this->buildApplyEventContents($value["property"],$contents,$contentConfig);
+                //如果没对应的字段值或没封装组件，跳过本次循环
+                if(empty($info)){
                     continue;
                 }
-
-                //根据类型组装数据
-                switch ($contentControl){
-                    case "Text":
-                        $controlsInfo[] = [
-                            "control" => $contentControl,
-                            "id" => $contentId,
-                            "title" => [
-                                "text" => $contentId,
-                                "lang" => "zh_CN"
-                            ],
-                            "value" => [
-                                "text" => $contents[$contentName]
-                            ]
-                        ];
-                        break;
-                    case "File":
-                        $file = [];
-                        foreach ($contents[$contentName] as $v){
-                            $file[] = [
-                                "file_id" => $v
-                            ];
-                        }
-                        $controlsInfo[] = [
-                            "control" => $contentControl,
-                            "id" => $contentId,
-                            "title" => [
-                                "text" => $contentId,
-                                "lang" => "zh_CN"
-                            ],
-                            "value" => [
-                                "files" => $file
-                            ]
-                        ];
-                        break;
-                }
+                $controlsInfo[] = $info;
             }
         }
         else{
@@ -2195,5 +2158,82 @@ class QWechat
         return json_encode($data,JSON_UNESCAPED_UNICODE);
     }
 
+    /**
+     * 构建控件
+     * @param $info
+     * @param $contents
+     * @return array
+     */
+    public function buildApplyEventContents($info,$contents,$ContentConfig){
+        //获取控件 名称、id、类型
+        $contentId = $info["id"];
+        $contentType = $info["control"];
+        $contentName = $info["title"][0]["text"];
+
+        //如果入参没有，跳过
+        if(empty($contents[$contentName])){
+            return [];
+        }
+
+        $value = [];
+        switch ($contentType){
+            //构建text组件
+            case "Text":
+                $content = ["text" => $contents[$contentName]];
+                break;
+            //构建file组件
+            case "File":
+                $file = [];
+                foreach ($contents[$contentName] as $value){
+                    $file[] = [
+                        "file_id" => $value
+                    ];
+                }
+                $content = ["files" => $file];
+                break;
+            //构建table组件
+            case "Table":
+                //获取子组件
+                $item = $ContentConfig["table"]["children"];
+                $children = [];
+                //构建子组件内容
+                foreach ($contents[$contentName] as $key => $value){
+                    foreach ($item as $val){
+                        $contentConfig = empty($value["config"]) ? [] : $value["config"];
+                        $buil = $this->buildApplyEventContents($val["property"],$value,$contentConfig);
+                        if(empty($buil)){
+                            continue;
+                        }
+                        $children[$key]["list"][] = $buil;
+                    }
+                }
+                $content = ["children" => $children];
+                break;
+            default:
+                return [];
+        }
+
+
+        $controlsInfo = [
+            "control" => $contentType,
+            "id" => $contentId,
+            "value" => $content
+        ];
+        return $controlsInfo;
+    }
+
+    public function updateTaskcard($data){
+        if (!$this->access_token && !$this->checkAuth()) return false;
+        $result = $this->http_post(self::API_URL_PREFIX.self::MESSAGE_UPDATE_TASKCARD.'access_token='.$this->access_token,$data);
+        if ($result)
+        {
+            $json = json_decode($result,true);
+            if (!$json || !empty($json['errcode'])) {
+                return false;
+            }
+            return true;
+        }
+        return false;
+    }
 }
 
